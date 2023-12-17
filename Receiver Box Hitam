@@ -1,0 +1,97 @@
+//DATA LORA RF96 MAPPI32
+//MISO = 12
+//MOSI = 13
+//SCK = 14
+//NSS =15
+//DI02 = 4
+//DI01 = 2
+//DI00 = 27
+//RST = 0
+//Pin I2C SDA LCD ke pin 21
+//Pin I2C SCL LCD ke pin 22
+//Pin VCC ke +5 V
+//Pin Relay 32
+
+#include <LiquidCrystal_I2C.h> // menambahkan library tersebut yang digunakan untuk menangani LCD melalui I2C
+
+// Membuat objek lcd dari kelas LiquidCrystal_I2C
+// dengan alamat I2C 0x27, 16 kolom, dan 2 baris
+LiquidCrystal_I2C lcd(0x27,16,2);  
+
+#include <SPI.h>               // library ini digunakan ntuk berkomunikasi melalui protokol Serial Peripheral Interface (SPI). SPI sering digunakan untuk berkomunikasi dengan berbagai perangkat seperti sensor atau modul
+#include <LoRa.h>              // library untuk berkomunikasi menggunakan teknologi Long Range (LoRa)
+
+//mendefinisikan pin yang digunakan 
+#define nss 15
+#define rst 0
+#define dio0 27
+#define misso 12
+#define mosi 13
+#define sck 14
+
+int RELAY = 32;       // Nomor pin yang mengontrol relay pada perangkat fisik
+String inString = ""; // String untuk menyimpan data yang diterima dari suatu sumber (misalnya, modul LoRa atau sensor)
+int NILAISENSOR = 0;  // Variabel untuk menyimpan nilai dari sensor, dalam hal ini, nilai analog dari suatu sensor
+float KADAR_DO;       // Variabel untuk menyimpan nilai kadar oksigen terlarut (DO), yang kemungkinan dihitung atau dikonversi dari nilai sensor analog
+
+void setup() {
+  Serial.begin(115200);   // Mengaktifkan komunikasi serial dengan baud rate 115200 bps
+  pinMode(RELAY,OUTPUT);  // Mengatur pin RELAY sebagai output
+  lcd.init();             // Menginisialisasi LCD          
+  lcd.backlight();        // Menyalakan backlight LCD
+  
+  //Konfigurasi dan inisialisasi modul LoRa
+  SPI.begin(sck, misso, mosi, nss);
+  LoRa.setPins(nss, rst, dio0);
+  digitalWrite(RELAY,LOW);  // Menyimpan relay dalam keadaan mati
+  
+  while (!Serial);                            // Menunggu hingga koneksi serial terbuka
+  Serial.println("LoRa Receiver");            // Mencetak pesan "LoRa Receiver" ke serial monitor
+  if (!LoRa.begin(923E6)) {                   // Memulai modul LoRa pada frekuensi 923 MHz (atau 915 MHz)
+    Serial.println("Starting LoRa failed!");  // Jika inisialisasi gagal, mencetak pesan ke serial monitor
+    while (1);                                // Masuk ke dalam loop tak terbatas untuk menghentikan eksekusi program
+  }
+}
+void loop() {
+  lcd.clear();                          // Menghapus tampilan LCD
+  int packetSize = LoRa.parsePacket();  // Mencoba untuk mem-parsing paket dari modul LoRa
+  if (packetSize) {                     // Jika ukuran paket lebih dari 0, artinya ada paket yang berhasil diparsing
+      
+    while (LoRa.available())            // Selama ada data yang tersedia di modul LoRa
+    {
+      int inChar = LoRa.read();         // Membaca satu byte data dari modul LoRa
+      inString += (char)inChar;         // Menambahkan karakter ke dalam string inString
+      NILAISENSOR = inString.toInt();   // Mengonversi nilai dalam string menjadi bilangan bulat dan menyimpannya dalam NILAISENSOR
+    }
+    inString = "";                      // Mengosongkan string inString setelah membaca seluruh data
+    LoRa.packetRssi();                  // Membaca kekuatan sinyal (RSSI) dari paket LoRa
+  }
+  // Menghitung kadar DO berdasarkan nilai sensor analog
+  KADAR_DO = (NILAISENSOR*0.004884);    //rumus konversi analog 0-4096 menjadi 0.00 s.d 20.00  dalam satuan mg/l
+  Serial.print("KADAR DO = ");          // Mencetak nilai kadar DO ke serial monitor
+  Serial.println(KADAR_DO);  
+  
+  lcd.setCursor(0,0);    // Menetapkan posisi kursor di LCD ke kolom 0, baris 0
+  lcd.print("DO =");     // Mencetak teks "DO =" di LCD, mengindikasikan bahwa nilai yang akan ditampilkan adalah kadar oksigen terlarut
+  lcd.setCursor(5,0);    // Menetapkan posisi kursor di LCD ke kolom 5, baris 0
+  lcd.print(KADAR_DO);   // Mencetak nilai kadar DO di LCD
+  lcd.setCursor(12,0);   // Menetapkan posisi kursor di LCD ke kolom 12, baris 0
+  lcd.print("mg/L");     // Mencetak teks "mg/L" di LCD, memberikan satuan untuk nilai kadar oksigen terlarut
+
+//Kadar DO normal > 6 mg/l
+if (KADAR_DO < 6)     //jika kadar DO kurang dari 6 mg/l
+  {
+    Serial.println("KINCIR HIDUP");   // Mencetak pesan "KINCIR HIDUP" ke serial monitor
+    lcd.setCursor(0,1);               // Menetapkan posisi kursor di LCD ke kolom 0, baris 1
+    lcd.print("KINCIR HIDUP");        // Mencetak pesan "KINCIR HIDUP" di LCD
+    digitalWrite(RELAY,HIGH);         // Menyalakan relay (kincir)
+}
+  }
+  if (KADAR_DO >= 8)            // Jika kadar DO lebih dari atau sama dengan 8 mg/L
+  {
+    Serial.println("KINCIR MATI");  // Mencetak pesan "KINCIR MATI" ke serial monitor
+    lcd.setCursor(0,1);             // Menetapkan posisi kursor di LCD ke kolom 0, baris 1
+    lcd.print("KINCIR MATI");       // Mencetak pesan "KINCIR MATI" di LCD
+    digitalWrite(RELAY,LOW);        // Mematikan relay (mematikan kincir)
+  }
+}
