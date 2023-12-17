@@ -1,0 +1,144 @@
+#include <WiFi.h>           // memasukkan library WiFi
+#include <HTTPClient.h>     // memasukkan library HTTP Client
+#include <SPI.h>            // library ini digunakan ntuk berkomunikasi melalui protokol Serial Peripheral Interface (SPI). SPI sering digunakan untuk berkomunikasi dengan berbagai perangkat seperti sensor atau modul
+#include <LoRa.h>           // library untuk berkomunikasi menggunakan teknologi Long Range (LoRa)
+#define SENSOR 34
+
+//mendefinisikan pin yang digunakan oleh modul transceiver
+#define nss 15
+#define rst 0
+#define dio0 27
+#define miso 12
+#define mosi 13
+#define sck 14
+
+int sensorValue;                        //membuat variabel sensorvalue yg nilainya bulat
+float outputValueOksigen;               // membuat variable nilai oksigen yang nilainya bilangan desimal
+String apiKey = "4RTZZOF83XNXD5JM";     // membuat variabel API Key yg berbentuk teks yg datanya diambil di thingspeak
+const char *ssid =  "Meilindaa P";      // menyimpan karakter yang tetap untuk ssid hotspot 
+const char *pass =  "meilindaa14";      // menyimpan karakter yang tetap untuk ssid password
+char server[] = "api.thingspeak.com";   // karakter alamat website server
+const int port = 80;                    // membuat variabel port jaringan server konstan di 80
+
+float NILAISENSOR = 0;                   // Membuat variabel  dengan nama NILAISENSOR yang nilainya bilangan desimal dengan memberikan nilai awal 0
+float KADAR_DO;                         // membuat variabel dengan nama KADAR_DO yang nilainya bilangan desimal
+
+int status = WL_IDLE_STATUS;            // membuat variabel status = WL_IDLE_STATUS yang nilainya bilangan bulat
+WiFiClient client;                  // deklarasi objek WifiClient, digunakan untuk membuat koneksi ke server
+
+String Oksigen;                  // membuat variabel oksigen yang bentuknya teks yang akan dikirim
+
+void setup() 
+{
+  Serial.begin(115200);              // mengaktifkan serial boud rate pada kecepatan 115200 bps
+  delay(100);                        // tunda 100 milidetik untuk persiapan serial
+  Serial.println("START...");        // menampilkan teks "START..." pada serial monitor
+  
+  wifiInit();                        // fungsi kecil yg dapat dipanggil dg nama wifiInit()
+  pinMode(SENSOR,INPUT);             // Mengatur pin SENSOR sebagai input
+  SPI.begin(sck, miso, mosi, nss);  // Memulai komunikasi SPI dengan konfigurasi pin yang telah didefinisikan sebelumnya
+  LoRa.setPins(nss, rst, dio0);      // Mengatur pin LoRa pada pin nss,rst,dio0
+  
+  while (!Serial);                   // Menunggu hingga koneksi serial terhubung
+  Serial.println("LoRa Sender");     // Menampilkan teks "LoRa Sender" pada serial monitor
+  if (!LoRa.begin(923E6)) {          // mencoba Memulai modul LoRa pada frekuensi 923 MHz (atau 915 MHz), jika gagal:
+    Serial.println("Starting LoRa failed!");// Mencetak pesan kegagalan pada serial monitor
+    while (1);                       // Membuat loop tanpa henti
+}
+
+void loop()  {
+  
+  getValue();                           // panggil fungsi "getValue()"
+  sendData();                           // panggil fungsi sendData
+  lora();                               //panggil fungsi LoRa
+  delay(5000);                          // tunda 5000 milidetik untuk pembacaan dan pengiriman selanjutnya
+}
+
+void getValue()                             // fungsi tambahan bernama "getValue()"
+{
+  Serial.println("Monitoring Kualitas Oksigen Air");  // Menampilkan teks "Monitoring Kualitas Oksigen Air" pada serial monitor        
+  float sensorValue = analogRead (SENSOR);            // membuat variabel sensorvalue bernilai desimal yang datanya diambil dari Membaca nilai analog dari SENSOR dan menyimpannya dalam variabel sensorValue
+  Serial.println(sensorValue);                        // Menampilkan nilai sensorValue ke serial monitor
+  
+  LoRa.print(sensorValue);        // Menyisipkan nilai sensorValue ke dalam paket LoRa
+  LoRa.endPacket();               // Mengakhiri paket LoRa untuk pengiriman
+  delay(50);                      // Menunda eksekusi program selama 50 milidetik
+  
+  outputValueOksigen = (sensorValue*0.004884);  // Menghitung nilai kualitas oksigen air berdasarkan nilai sensor
+  Oksigen = String(outputValueOksigen);         // Mengonversi nilai outputValueOksigen berbentuk teks dan menyimpannya dalam variabel Oksigen 
+  Serial.println("Oksigen = " + Oksigen);       // Mencetak nilai Oksigen ke serial monitor dengan teks "Oksigen = "
+  Serial.println(); // Mencetak baris kosong ke serial monitor
+  Serial.println(); // Mencetak baris kosong ke serial monitor
+}
+
+void sendData()
+{
+  if (!client.connect(server, port))          // melakukan koneksi ke server melalui port 80 jika tidak terkoneksi maka akan
+  {
+    Serial.println("No connection");          // mencetak teks "No connection"
+    while (!client.connect(server, port))     // program akan terus mencoba melakukan koneksi ke server selama koneksi tidak berhasil hingga berhasil
+    {
+      Serial.print(".");      // mencetak "."
+      delay(1000);          // menunda selama 1000 milidetik
+    }
+    return;                  // menghentikan fungsi                  
+  }
+  else if (client.connect(server, port))      // untuk mengecek apakah pengkoneksian ke server berhasil di lakukan
+  {
+    String dataStr = apiKey;                  // Inisialisasi dataStr dengan nilai yang sama dengan apiKey 
+    dataStr += "&field1=";                    // tambahkan string "&field1="
+    dataStr += Oksigen;                       // tambahkan isi dari variabel 
+   
+    #mengirimkan permintan hhtp post
+    client.print("POST /update HTTP/1.1\n");                              // untuk mengirimkan permintaan http post ke server
+    client.print("Host: api.thingspeak.com\n");                           // Host yang dikirim sebagai bagian dari permintaan http ke server thingspeak
+    client.print("Connection: close\n");                                  // untuk menentukan bahwa kkoneksi ke server setelah permintaan ini di tutup
+    client.print("X-THINGSPEAKAPIKEY: " + apiKey + "\n");                 // menambahkan header http "X-THINGSPEAKAPIKEY" dan nilainya diambil dari variabel apiKey.
+    client.print("Content-Type: application/x-www-form-urlencoded\n");    // data yang dikirimkan dienkapsulasi dalam format URL-encoded.
+    client.print("Content-Length: ");     //digunakan untuk menambahkan header HTTP "Content-Length" ke dalam permintaan HTTP. Header ini memberikan informasi tentang panjang (jumlah byte) dari badan permintaan yang dikirim ke server. 
+    client.print(dataStr.length());                                       // ntuk menambahkan nilai panjang (jumlah karakter) dari string dataStr,memberitahu server tentang ukuran data yang akan diterima 
+    client.print("\n\n");                                                 // digunakan untuk menambahkan dua baris kosong
+    client.print(dataStr);                                                // ditambahkan sebagai bagian dari permintaan HTTP POST.
+
+    while (!client.available());                                          // untuk membuat program menunggu hingga data tersedia untuk dibaca dari objek client
+    while (client.available()) {                                          // digunakan untuk membuat program membaca data yang tersedia dari objek client
+      char c = client.read();                                             // untuk membaca satu karakter (byte) dari data yang diterima dari server atau perangkat jaringan lainnya.
+      Serial.write(c);                                                    // mengirim data byte ke Serial Monitor untuk pemantauan 
+    }
+
+    Serial.println();               // Mencetak baris kosong ke serial monitor
+    Serial.println("DATA STRING =");// Mencetak teks "DATA STRING =" ke serial monitor
+    Serial.println(dataStr);        // Mencetak isi variabel dataStr ke serial monitor
+    Serial.println("SENDED");       // Mencetak teks "SENDED" ke serial monitor
+
+    client.stop();                                                        // stop koneksi ke server
+    Serial.println("closing connection");                                 // mencetak teks "closing connection"
+    Serial.println();
+  }
+}
+
+void lora() 
+{
+ NILAISENSOR = analogRead(SENSOR);    // Membaca nilai analog dari pin SENSOR dan menyimpannya dalam variabel NILAISENSOR
+  LoRa.beginPacket();                 // Memulai pengiriman paket data LoRa
+  LoRa.print(NILAISENSOR);            // mengirimkan nilai NILAISENSOR melalui LoRa
+  LoRa.endPacket();                   // Mengakhiri paket LoRa untuk pengiriman
+  delay(50);                          // Menunda eksekusi program selama 50 milidetik
+}
+
+void wifiInit() {                            // fungsi tambahan bernama "wifiInit()"
+  delay(1000);                              // tunda 1000 milidetik
+  Serial.print("Connecting to " + *ssid);   // print proses koneksi ke hotspot
+  delay(500);                               // tunda 500 milidetik
+  status = WiFi.begin(ssid, pass);          // digunakan untuk memulai proses koneksi ke jaringan WiFi 
+
+  while (WiFi.status() != WL_CONNECTED)     // membuat program menunggu hingga perangkat terhubung ke wifi
+  {
+    delay(1000);                            // tunda 1000 milidetik
+    Serial.print(".");                      // print simbol titik "."
+  }
+  Serial.println();                         // print baris baru
+  Serial.println("WiFi connected");         // print tanda WiFi terkoneksi
+  Serial.println("IP address: ");     // mencetak alamat IP ke serial monitor
+  Serial.println(WiFi.localIP());           // print IP lokal
+}
